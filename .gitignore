@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Runtime files (generated in user projects, not in this repo)
+overnight-plan.md
+.overnight-stop
+.overnight-logs/
