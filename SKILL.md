@@ -1,6 +1,6 @@
 ---
 name: overnight
-description: Autonomous long-running coding — decompose a big goal into EARS-style tasks, then execute each in an isolated worktree session while you're away. /overnight PROMPT — that's it.
+description: Autonomous background agent — give it a big coding goal, walk away, come back to a branch of working code. Decomposes, executes, and verifies tasks unattended.
 user_invocable: true
 argument-hint: "[big goal description]"
 ---
@@ -15,6 +15,28 @@ You are the **orchestrator**. The user gives you a high-level objective. You dec
 
 ---
 
+## Phase 0: Preflight
+
+Before anything else, verify the workspace is safe to use:
+
+```bash
+# 1. Reject dirty working tree
+if [ -n "$(git status --porcelain)" ]; then
+  echo "ERROR: Uncommitted changes detected. Commit or stash before running /overnight."
+  exit 1
+fi
+
+# 2. Create branch with timestamp precision to avoid same-day collisions
+OVERNIGHT_BRANCH="overnight/$(date '+%Y-%m-%d-%H%M%S')"
+git checkout -b "$OVERNIGHT_BRANCH"
+```
+
+If the working tree is dirty, **stop immediately** and tell the user to commit or stash first.
+
+If CLAUDE.md does not exist, inform the user: "No CLAUDE.md found. The first task will generate one from codebase analysis."
+
+---
+
 ## Phase 1: Decompose
 
 ### Step 1 — Understand the Goal
@@ -23,47 +45,99 @@ Read the project's CLAUDE.md, README, and key source files. Build enough context
 
 ### Step 2 — Generate the Plan
 
-Break the goal into the **maximum number** of small, single-concern tasks. More tasks = smaller blast radius = safer overnight execution.
+Break the goal into the **maximum number** of small, single-concern tasks. More tasks = smaller blast radius = safer autonomous execution.
+
+**Decomposition heuristics:**
+- One task per public API endpoint
+- One task per database model or schema change
+- One task per error-handling path
+- One task per configuration concern
+- Test task before implementation task when adding behavior
 
 **Task format — every task MUST follow this structure:**
 
 ```markdown
 - [ ] **Task title** `overnight-<n>`
-  - WHEN [trigger/context] THE SYSTEM SHALL [behavior]
-  - Completion: `[exact command that returns 0 on success]`
-  - Permissions: [always: list | ask: list | never: list]
+  - <EARS requirement>
+  - Acceptance: `<shell command returning 0>` | REVIEW: <what to check>
+  - Files: <expected files to create or modify>
 ```
 
-The backtick name (`overnight-<n>`) is the **worker name** = worktree name = session ID. One name tracks everything.
+The backtick name (`overnight-<n>`) is the **worker name** = worktree name.
 
-**Rules:**
+### EARS Patterns
 
-1. **EARS syntax required.** WHEN/IF/WHILE ... THE SYSTEM SHALL. No ambiguous descriptions.
-2. **Machine-verifiable completion only.** A shell command that returns 0 or doesn't.
-3. **One task = one concern.** Two modules? Split. Two WHEN clauses? Split.
-4. **Permission boundaries per task.** always / ask / never.
-5. **Order matters.** Sequential execution. No forward dependencies.
-6. **Tests first when possible.** Test task before implementation task.
+Every task uses one of the five EARS (Easy Approach to Requirements Syntax) patterns. Choose the correct one:
 
-### Step 3 — Create Overnight Branch, Write the Plan, and Start
+| Pattern | Syntax | When to use |
+|---------|--------|-------------|
+| **Ubiquitous** | THE SYSTEM SHALL [behavior] | Always-true behavior. No precondition. |
+| **Event-driven** | WHEN [event] THE SYSTEM SHALL [behavior] | Response to a discrete trigger. |
+| **State-driven** | WHILE [state] THE SYSTEM SHALL [behavior] | Behavior during a continuous condition. |
+| **Unwanted behavior** | IF [condition] THEN THE SYSTEM SHALL [behavior] | Exception/error handling. |
+| **Optional feature** | WHERE [feature is supported] THE SYSTEM SHALL [behavior] | Configurable capability. |
 
-1. Create a dedicated overnight branch from the current HEAD:
+**Examples:**
+```markdown
+- [ ] **Expose health endpoint** `overnight-1`
+  - THE SYSTEM SHALL expose a GET /health endpoint returning 200 with { status: "ok" }
+  - Acceptance: `curl -sf http://localhost:3000/health | grep -q ok`
+  - Files: src/routes/health.ts, tests/health.test.ts
 
-   ```bash
-   OVERNIGHT_BRANCH="overnight/$(date '+%Y-%m-%d')"
-   git checkout -b "$OVERNIGHT_BRANCH"
+- [ ] **Hash passwords on registration** `overnight-2`
+  - WHEN a user account is created THE SYSTEM SHALL store the password using bcrypt with cost factor 12
+  - Acceptance: `npm test -- --grep "password hashing"`
+  - Files: src/models/user.ts, tests/user.test.ts
+
+- [ ] **Handle duplicate email registration** `overnight-3`
+  - IF a registration request uses an email that already exists THEN THE SYSTEM SHALL return 409 Conflict
+  - Acceptance: `npm test -- --grep "duplicate email"`
+  - Files: src/routes/auth.ts, tests/auth.test.ts
+
+- [ ] **Maintain session during active use** `overnight-4`
+  - WHILE a user session is active THE SYSTEM SHALL refresh the session TTL on each authenticated request
+  - Acceptance: `npm test -- --grep "session refresh"`
+  - Files: src/middleware/session.ts, tests/session.test.ts
+```
+
+### Acceptance Criteria
+
+Two modes are allowed:
+
+| Mode | Format | When to use |
+|------|--------|-------------|
+| **Machine-verifiable** | `Acceptance: \`command\`` | Tests, builds, linting, grep checks |
+| **Review-required** | `Acceptance: REVIEW: <description>` | Refactoring, documentation, UI changes |
+
+Tasks with `REVIEW:` acceptance are marked `- [R]` on completion instead of `- [x]`, signaling they need human review.
+
+### Rules
+
+1. **EARS syntax required.** Choose the correct pattern. No ambiguous descriptions.
+2. **One task = one concern.** Two modules? Split. Two EARS clauses? Split.
+3. **Order matters.** Sequential execution. No forward dependencies.
+4. **Tests first when possible.** Test task before implementation task.
+5. **File scope required.** Every task lists expected files to touch.
+
+### Step 3 — Write the Plan, Estimate Cost, and Start
+
+1. Write the plan to `overnight-plan.md`.
+
+2. Print cost estimate:
+   ```
+   Overnight plan: <goal summary>
+   Tasks: <N>
+   Estimated cost: ~$<N × 3-5> (based on ~$3-5 per task)
+   Branch: <OVERNIGHT_BRANCH>
    ```
 
-   **All work happens on this branch. Main is never touched.** The user wakes up, reviews the branch, and decides whether to PR/merge.
-
-2. Write the plan to `overnight-plan.md` and commit it:
-
+3. Commit the plan:
    ```bash
    git add overnight-plan.md
    git commit -m "overnight: plan — <goal summary>"
    ```
 
-3. **Immediately** begin Phase 2.
+4. **Immediately** begin Phase 2.
 
 No approval gate. `/overnight` IS the approval.
 
@@ -71,7 +145,7 @@ No approval gate. `/overnight` IS the approval.
 
 ## Phase 2: Execute (Orchestrator Loop)
 
-You are the orchestrator. For each unchecked task in `overnight-plan.md`, do the following:
+You are the orchestrator. For each task in `overnight-plan.md`, do the following:
 
 ### 2.1 — Check Termination Conditions
 
@@ -79,84 +153,104 @@ Before each task, check ALL of these. Stop if any is true:
 
 | Condition | Action |
 |-----------|--------|
-| `.overnight-stop` file exists | Remove file. Report results. End with: "I'm going to bed too..." |
-| 3 consecutive tasks BLOCKED | Report results. End with: "I'm going to bed too..." |
+| `.overnight-stop` file exists | Remove file. **Print summary. End: "Stopping as requested. Here's where things stand..."** |
+| 3 consecutive tasks BLOCKED | **Print summary. End: "Hit a wall — 3 tasks in a row couldn't complete. Here's what's blocking..."** |
 | No `- [ ]` remain in plan | **Go to Phase 3 (Mine for More Work).** |
 
-**The final message is always "I'm going to bed too..."** — regardless of the reason. Before this message, print a summary of what was accomplished (tasks completed, blocked, remaining, branch name for review).
+Only `.overnight-stop` and consecutive failures are hard stops. Completing the plan triggers Phase 3.
 
-Only `.overnight-stop` and consecutive failures are hard stops. Completing the plan is NOT a stop — it's a signal to look for more.
+### 2.2 — Select Next Task
 
-### 2.2 — Dispatch Worker
+Find the first `- [ ]` task in `overnight-plan.md`. **Skip any task that contains `<!-- BLOCKED` — these have already failed and should not be retried.**
 
-Find the first unchecked `- [ ]` task. Extract its name, prompt, and completion command. Then spawn a worker:
+### 2.3 — Dispatch Worker (Synchronous)
+
+Write the worker prompt to a temp file to avoid shell quoting issues, then spawn:
 
 ```bash
-claude -w <name> -p "You are an overnight worker session.
+# Write prompt to temp file (avoids shell interpolation problems)
+cat > /tmp/overnight-worker-prompt.md << 'PROMPT_END'
+You are an overnight worker session.
 
 PROJECT CONTEXT:
-$(cat CLAUDE.md 2>/dev/null || echo 'No CLAUDE.md found.')
+<contents of CLAUDE.md, read from file>
 
 YOUR TASK:
 <full task block from overnight-plan.md>
 
 INSTRUCTIONS:
-1. Read relevant code before changing anything.
-2. Implement ONLY this task. Do not touch anything else.
-3. Run the completion command: <completion command>
-4. If it passes, commit your changes with a descriptive message.
-5. If it fails, retry up to 3 times with fixes.
-6. If still failing after 3 attempts, commit what you have with message 'overnight: BLOCKED — <reason>'.
-7. Exit when done." \
-  --session-id <name> \
+1. You are on a worktree branch. Only modify files relevant to this task.
+2. Read relevant code before changing anything.
+3. Implement ONLY this task. Do not touch anything else.
+4. Run the acceptance command: <acceptance command>
+5. If it passes, commit your changes with message: "overnight: <task title>"
+6. If it fails, retry up to 3 times with fixes.
+7. If still failing after 3 attempts, commit what you have with message: "overnight: BLOCKED — <reason>"
+8. Do NOT run git checkout, git merge, or switch branches.
+9. Exit when done.
+PROMPT_END
+
+# Spawn worker — this BLOCKS until the worker exits
+claude -w <name> \
+  -p "$(cat /tmp/overnight-worker-prompt.md)" \
   --permission-mode auto \
   --max-budget-usd 5
 ```
 
-### 2.3 — Monitor Completion
-
-Poll the worker's git state until it finishes:
-
-```bash
-# Check if worker process is still running
-jobs -l
-
-# Check for commits on the worker branch
-git log --oneline "$OVERNIGHT_BRANCH"..worktree-<name>
-```
-
-If the worker has committed and its process has exited, it's done.
+**This is a blocking call.** The orchestrator waits until the worker finishes. No polling needed.
 
 ### 2.4 — Evaluate Result
 
+After the worker exits, check its branch:
+
 ```bash
 # Check what changed
-git diff --stat "$OVERNIGHT_BRANCH"...worktree-<name>
+git log --oneline "$OVERNIGHT_BRANCH"..$(git worktree list | grep <name> | awk '{print "HEAD"}')
 
 # Check if BLOCKED
-git log --oneline -1 worktree-<name> | grep -q "BLOCKED"
+git log --oneline -1 <worktree-branch> | grep -q "BLOCKED"
 ```
 
-- **If BLOCKED:** Mark task in `overnight-plan.md` with `<!-- BLOCKED: reason -->`. Increment consecutive failure counter.
-- **If success:** Reset consecutive failure counter.
+- **If BLOCKED:** Update `overnight-plan.md` — add `<!-- BLOCKED: reason -->` after the task line. Increment consecutive failure counter.
+- **If success:** Reset consecutive failure counter to 0.
+- **If REVIEW acceptance:** Mark as `- [R]` instead of `- [x]`.
 
 ### 2.5 — Merge to Overnight Branch
 
+**Verify merge success before proceeding:**
+
 ```bash
 git checkout "$OVERNIGHT_BRANCH"
-git merge --squash worktree-<name>
-git commit -m "overnight: <task title>"
+
+# Attempt squash-merge
+if git merge --squash <worktree-branch>; then
+  git commit -m "overnight: <task title>"
+else
+  # Merge conflict — mark as BLOCKED, abort
+  git merge --abort
+  # Mark task BLOCKED in overnight-plan.md
+  # Increment consecutive failure counter
+fi
 ```
 
 ### 2.6 — Cleanup and Update State
 
+**Only delete the branch after confirming merge succeeded:**
+
 ```bash
+# Find actual worktree path (don't assume .claude/worktrees/)
+WORKTREE_PATH=$(git worktree list | grep <name> | awk '{print $1}')
+
 # Remove worktree
-git worktree remove .claude/worktrees/<name>
-git branch -D worktree-<name>
+git worktree remove "$WORKTREE_PATH"
+
+# Safe delete — refuses if not merged (safety net)
+git branch -d <worktree-branch>
+# Only if -d fails AND merge was confirmed:
+# git branch -D <worktree-branch>
 ```
 
-Update `overnight-plan.md`: mark task `- [x]`.
+Update `overnight-plan.md`: mark task `- [x]` (or `- [R]` for REVIEW tasks).
 
 Commit the state update:
 
@@ -173,37 +267,49 @@ Loop back to **2.1**. The next worker will branch from the updated overnight bra
 
 ## Phase 3: Mine for More Work
 
-When all `- [ ]` tasks are complete, **do not stop**. Actively look for more meaningful work related to the original goal:
+**Maximum 2 mining cycles.** When all `- [ ]` tasks are complete:
 
-1. **Review what was built.** Read the code produced so far. Run the full test suite. Run the linter. Check for TODOs left in the code.
+1. **Run objective checks.** Run the full test suite. Run the linter. These are facts, not opinions.
 
-2. **Ask yourself these questions:**
-   - Are there edge cases not covered by tests?
-   - Are there error handling paths missing?
-   - Did any BLOCKED task leave a gap that can now be approached differently?
-   - Does the feature need integration tests beyond unit tests?
-   - Are there documentation gaps (API docs, inline comments for complex logic)?
-   - Can performance be improved for obvious bottlenecks?
-   - Are there accessibility, validation, or security hardening tasks?
+2. **Look for concrete gaps:**
+   - Test failures or lint errors introduced by overnight work
+   - BLOCKED tasks that can now be approached differently (different strategy, not retry)
+   - TODOs left in the code by workers
+   - Missing error handling for paths that are clearly unhandled
 
-3. **If you find work:** Generate new tasks in the same EARS format, append them to `overnight-plan.md`, commit, and loop back to **Phase 2**.
+3. **If you find work:** Generate new tasks in the same format, append to `overnight-plan.md`, commit, and loop back to **Phase 2**. Decrement mining cycles remaining.
 
-4. **If you genuinely cannot find more meaningful work:** Report results and end with "I'm going to bed too..."
+4. **If no concrete gaps found, or mining cycles exhausted:** Print final summary and end.
 
-**Be aggressive in finding work, but honest about when you're done.** Inventing busywork is worse than stopping. If the next task you'd generate feels like filler — stop.
+**Only generate tasks for objectively measurable gaps** (test failures, lint errors, missing error paths, BLOCKED retries). Do NOT generate tasks for subjective improvements (code style, documentation polish, "nice to have" features).
 
 ---
 
-## Recovery (fire-and-remember)
+## Final Summary
 
-If a worker needs help or additional context:
+When stopping for any reason, always print a structured summary:
 
-```bash
-# Resume with full context preserved
-claude -r <name> -p "The completion command failed because X. Try Y instead."
+```
+══════════════════════════════════════════
+OVERNIGHT COMPLETE
+══════════════════════════════════════════
+Goal:      <original goal>
+Branch:    <OVERNIGHT_BRANCH>
+Completed: <N> tasks  [x]
+Review:    <N> tasks  [R]
+Blocked:   <N> tasks  <!-- BLOCKED -->
+Remaining: <N> tasks  [ ]
+
+Files changed: <output of git diff --stat main..OVERNIGHT_BRANCH>
+
+Next steps:
+  git diff main...<OVERNIGHT_BRANCH>        # review all changes
+  gh pr create --head <OVERNIGHT_BRANCH>    # ship it
+  git branch -D <OVERNIGHT_BRANCH>          # discard
+══════════════════════════════════════════
 ```
 
-Worker name = session ID, so context is preserved across resumes.
+Then end with: **"I'm going to bed too..."**
 
 ---
 
@@ -212,48 +318,24 @@ Worker name = session ID, so context is preserved across resumes.
 ```
 overnight-plan.md IS the state.
 
-- [x] **Task title** `overnight-1`   ← done, merged to overnight branch
-- [ ] **Task title** `overnight-2`   ← current (first unchecked)
-- [ ] **Task title** `overnight-3`   ← future
-- [ ] **Task title** <!-- BLOCKED: reason --> `overnight-4` ← failed, skipped
+- [x] **Task title** `overnight-1`                          ← done, merged
+- [R] **Task title** `overnight-2`                          ← done, needs human review
+- [ ] **Task title** `overnight-3`                          ← next up (first unchecked)
+- [ ] **Task title** <!-- BLOCKED: reason --> `overnight-4`  ← failed, SKIPPED
 ```
 
-Git history is the audit trail:
-
-```
-overnight/2026-03-18:
-  overnight: plan — Add user authentication
-  overnight: Add User model
-  overnight: mark Add User model complete
-  overnight: Add registration endpoint
-  overnight: mark Add registration endpoint complete
-  ...
-```
-
-User wakes up → reviews branch → creates PR or merges manually. Main stays clean.
+**BLOCKED tasks are skipped, never retried in Phase 2.** Phase 3 may attempt them with a different strategy.
 
 ---
 
 ## Anti-Patterns
 
 - **"Update the API and add tests and fix the docs"** → Three tasks. Split.
-- **"Make it work correctly"** → Not EARS. WHEN...SHALL what?
-- **"Completion: manually verify"** → Not machine-verifiable.
-- **Orchestrator writing code** → Never. You dispatch, monitor, merge. Workers write code.
-- **Skipping CLAUDE.md** → Overnight quality = CLAUDE.md quality. First task should create one if missing.
-
----
-
-## File Layout
-
-```
-project-root/
-├── overnight-plan.md              ← The plan (state machine)
-├── .overnight-stop                ← Touch to halt (auto-removed)
-└── .claude/worktrees/             ← Worktrees (created/removed per task)
-    ├── overnight-1/               ← Active worker (temporary)
-    └── ...
-```
+- **"Make it work correctly"** → Not EARS. Which pattern? What behavior?
+- **"Acceptance: looks good"** → Not verifiable. Use a command or REVIEW.
+- **Orchestrator writing code** → Never. You dispatch, monitor, merge.
+- **Retrying a BLOCKED task with the same approach** → Skip it. Phase 3 may try a different strategy.
+- **Mining busywork** → If the task feels like filler, stop. Only objective gaps.
 
 ---
 
@@ -261,13 +343,14 @@ project-root/
 
 For each task iteration, you (the orchestrator) must:
 
-- [ ] Check termination conditions
-- [ ] Extract next unchecked task from `overnight-plan.md`
-- [ ] Spawn worker with `claude -w <name> -p "..." --session-id <name> --permission-mode auto`
-- [ ] Wait for worker to complete (poll `jobs -l` + `git log`)
-- [ ] Evaluate: success or BLOCKED
-- [ ] Squash-merge worker branch to overnight branch
-- [ ] Remove worktree and branch
-- [ ] Update `overnight-plan.md` checkbox
-- [ ] Commit state update
-- [ ] Loop
+1. Check termination conditions (stop file, consecutive failures, all done)
+2. Select next `- [ ]` task, skipping any with `<!-- BLOCKED`
+3. Write worker prompt to temp file
+4. Spawn worker: `claude -w <name> -p "$(cat /tmp/overnight-worker-prompt.md)" --permission-mode auto --max-budget-usd 5`
+5. Wait for worker to exit (blocking call)
+6. Evaluate: success, REVIEW, or BLOCKED
+7. Squash-merge to overnight branch (verify success before cleanup)
+8. Safe-delete worktree and branch (`git branch -d`, not `-D`)
+9. Update `overnight-plan.md` checkbox
+10. Commit state update
+11. Loop

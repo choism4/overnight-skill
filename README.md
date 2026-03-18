@@ -1,24 +1,11 @@
 # Overnight
 
-> "One big goal. Maximum decomposition. Come back to working code."
-> "If you can't write a completion command, you don't understand the task yet."
-> "The orchestrator never writes code. It decomposes, dispatches, monitors, and merges."
-
-## What is Overnight?
-
-Overnight turns a big goal into a fully executed codebase — autonomously, for hours, while you're away.
-
-1. **Maximum decomposition** — Breaks your goal into the highest possible number of atomic, testable tasks
-2. **EARS-style requirements** — Every task uses WHEN/IF/WHILE...SHALL syntax. No ambiguity survives
-3. **Machine-verifiable completion** — Every task has a shell command that proves it's done
-4. **Isolated worktree per task** — Each task runs in its own `claude -w` session. Clean git isolation
-5. **Proactive work discovery** — When planned tasks are done, it actively mines for more meaningful work
-6. **Zero user intervention** — One command. Walk away. Come back to a branch full of working code
+One prompt. Zero babysitting. Come back to working code.
 
 ## Install
 
 ```bash
-npx skills add jadenkim/overnight-skill
+npx skills add choism4/overnight-skill
 ```
 
 ## Usage
@@ -27,174 +14,162 @@ npx skills add jadenkim/overnight-skill
 /overnight Add user authentication with email/password, OAuth, and session management
 ```
 
-That's it. Go do something else.
+That's it. Walk away.
 
 Come back and check:
 
 ```bash
-git log --oneline overnight/2026-03-18   # one squash-merge per task
-cat overnight-plan.md                     # [x] vs [ ] vs BLOCKED
+git log --oneline overnight/2026-03-18-231500   # one commit per task
+cat overnight-plan.md                            # [x] done, [R] needs review, BLOCKED failed
 
-# Happy? Create a PR
-gh pr create --head overnight/2026-03-18
+# Ship it
+gh pr create --head overnight/2026-03-18-231500
 
-# Not happy? Discard
-git branch -D overnight/2026-03-18
+# Or discard
+git branch -D overnight/2026-03-18-231500
 ```
 
-## How It Works
+## What It Does
+
+Overnight is an autonomous background agent for Claude Code. It takes a big goal, decomposes it into the maximum number of small testable tasks, then executes them one by one in isolated worktree sessions — for hours, unattended.
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│                         OVERNIGHT                                    │
-│                                                                      │
-│  /overnight "Add auth with OAuth and sessions"                      │
-│           │                                                          │
-│           ▼                                                          │
-│  PHASE 1: DECOMPOSE                                                 │
-│  ├── Create branch: overnight/YYYY-MM-DD                            │
-│  ├── Read CLAUDE.md + codebase                                      │
-│  ├── Break goal into maximum atomic tasks                           │
-│  ├── Apply EARS syntax (WHEN/IF/WHILE...SHALL)                      │
-│  ├── Assign worker name: overnight-1, overnight-2, ...              │
-│  └── Write overnight-plan.md + commit                               │
-│           │                                                          │
-│           ▼  (immediately)                                           │
-│                                                                      │
-│  PHASE 2: EXECUTE (orchestrator loop)                               │
-│  ┌─────────────────────────────────────────────────┐                │
-│  │  For each unchecked task:                       │                │
-│  │  ├── Check termination conditions               │                │
-│  │  ├── Spawn worker:                              │                │
-│  │  │     claude -w overnight-N                    │                │
-│  │  │       --session-id overnight-N               │                │
-│  │  │       --permission-mode auto                 │                │
-│  │  ├── Poll: jobs -l + git log                    │                │
-│  │  ├── Evaluate: success or BLOCKED               │                │
-│  │  ├── Squash-merge → overnight branch            │                │
-│  │  ├── Cleanup worktree + update plan [x]         │                │
-│  │  └── Next task                                  │                │
-│  └─────────────────────────────────────────────────┘                │
-│           │  all tasks done                                          │
-│           ▼                                                          │
-│  PHASE 3: MINE FOR MORE WORK                                       │
-│  ├── Review code, run tests, run linter                             │
-│  ├── Look for: edge cases, error handling, security,                │
-│  │   integration tests, BLOCKED retries, TODOs                      │
-│  ├── Found work → append tasks → back to Phase 2                   │
-│  └── Nothing left → "I'm going to bed too..."                       │
-│                                                                      │
-└──────────────────────────────────────────────────────────────────────┘
+/overnight "PROMPT"
+     │
+     ▼
+Phase 0: Preflight
+├── Check clean working tree (refuse if dirty)
+├── Create branch: overnight/YYYY-MM-DD-HHMMSS
+│
+Phase 1: Decompose
+├── Read CLAUDE.md + codebase
+├── Break goal into maximum atomic tasks (EARS syntax)
+├── Write overnight-plan.md + cost estimate
+│
+Phase 2: Execute (orchestrator loop)
+│  ┌─────────────────────────────────────────┐
+│  │  For each task:                         │
+│  │  ├── Skip BLOCKED tasks                 │
+│  │  ├── claude -w overnight-N              │
+│  │  │     --permission-mode auto           │
+│  │  │     --max-budget-usd 5               │
+│  │  │   (blocks until worker exits)        │
+│  │  ├── Verify merge → squash-merge        │
+│  │  ├── Safe cleanup (git branch -d)       │
+│  │  └── Update plan [x] or [R] or BLOCKED  │
+│  └─────────────────────────────────────────┘
+│
+Phase 3: Mine for More Work (max 2 cycles)
+├── Run tests + linter
+├── Find concrete gaps (failures, TODOs, BLOCKED retries)
+├── Generate new tasks → back to Phase 2
+└── No gaps found → print summary → "I'm going to bed too..."
 ```
 
 ## Architecture
 
 ```
-┌─────────────────────┐
-│    ORCHESTRATOR      │    Current Claude session.
-│    (this session)    │    Never writes code.
-│                      │    Decomposes, dispatches,
-│                      │    monitors, merges.
-└──────────┬──────────┘
-           │ claude -w overnight-1
-           ▼
-┌─────────────────────┐     ┌─────────────────────┐
-│  WORKER overnight-1 │     │  WORKER overnight-2  │
-│  (isolated worktree) │     │  (isolated worktree) │
-│                      │     │                      │
-│  Implements ONE task │     │  Implements ONE task │
-│  Runs completion cmd │     │  Runs completion cmd │
-│  Commits + exits     │     │  Commits + exits     │
-└──────────────────────┘     └──────────────────────┘
-        (sequential — 2 starts after 1 is merged)
+┌─────────────────────────┐
+│     ORCHESTRATOR         │    Current Claude session.
+│     (this session)       │    Never writes code.
+│                          │    Decomposes, dispatches,
+│                          │    monitors, merges.
+└────────────┬────────────┘
+             │ claude -w overnight-1 (blocking)
+             ▼
+┌─────────────────────────┐
+│   WORKER overnight-1     │    Isolated worktree.
+│                          │    Implements ONE task.
+│   1. Read relevant code  │    Runs acceptance check.
+│   2. Implement task      │    Commits + exits.
+│   3. Run acceptance cmd  │
+│   4. Commit + exit       │    Then orchestrator merges
+└─────────────────────────┘    and spawns overnight-2.
 ```
 
-- **Worker 2 inherits Worker 1's code** — each worktree branches from the latest overnight branch
-- **If a worker fails**, `claude -r overnight-3` resumes it with full context preserved
-- **Main is never touched** — all work on `overnight/YYYY-MM-DD` branch
+- Each worker gets a **fresh worktree** branched from the latest overnight branch
+- Workers run **synchronously** — orchestrator waits, no polling
+- **Main is never touched** — all work on `overnight/YYYY-MM-DD-HHMMSS`
 
 ## Task Format
 
-Every generated task follows this structure:
+Every task uses [EARS syntax](https://en.wikipedia.org/wiki/EARS_%28requirements_engineering%29) with two acceptance modes:
 
 ```markdown
-- [ ] **Create User model** `overnight-1`
-  - WHEN a user record is created THE SYSTEM SHALL store email and bcrypt-hashed password
-  - Completion: `npm test -- --grep "User model"`
-  - Permissions: always: read/write src/models/ | ask: install deps | never: drop tables
+- [ ] **Hash passwords on registration** `overnight-2`
+  - WHEN a user account is created THE SYSTEM SHALL store the password using bcrypt
+  - Acceptance: `npm test -- --grep "password hashing"`
+  - Files: src/models/user.ts, tests/user.test.ts
+
+- [ ] **Refactor auth middleware** `overnight-5`
+  - THE SYSTEM SHALL separate authentication and authorization into distinct middleware
+  - Acceptance: REVIEW: auth.ts split into authenticate.ts and authorize.ts
+  - Files: src/middleware/auth.ts → src/middleware/authenticate.ts, authorize.ts
 ```
 
-| Element | Purpose |
-|---------|---------|
-| **EARS syntax** (WHEN/IF/WHILE...SHALL) | Eliminates ambiguity. Forces behavioral spec. |
-| **Completion command** | Machine-verifiable. Returns 0 or doesn't. |
-| **Permission boundaries** | Prevents unattended sessions from doing damage. |
+| Mode | Format | Result |
+|------|--------|--------|
+| Machine-verifiable | `Acceptance: \`command\`` | Marked `[x]` on pass |
+| Human review needed | `Acceptance: REVIEW: description` | Marked `[R]` — needs your eyes |
+
+## What to Expect
+
+| Metric | Typical range |
+|--------|--------------|
+| Tasks generated | 8–30 |
+| Cost per task | ~$3–5 |
+| Total cost | $25–100 |
+| Runtime | 1–4 hours |
+| Output | One branch, one squash-merge per task |
 
 ## Termination
 
-| Trigger | What happens |
-|---------|-------------|
-| `.overnight-stop` file | Hard stop. Report + "I'm going to bed too..." |
-| 3 consecutive BLOCKED tasks | Hard stop. Something is fundamentally broken. |
-| All planned tasks done | **Not a stop.** Go to Phase 3 — mine for more work. |
-| No more meaningful work found | Final stop. "I'm going to bed too..." |
+| Trigger | Message |
+|---------|---------|
+| `.overnight-stop` file | "Stopping as requested. Here's where things stand..." |
+| 3 consecutive BLOCKED tasks | "Hit a wall — 3 tasks in a row couldn't complete..." |
+| All tasks done + Phase 3 exhausted | "I'm going to bed too..." |
 
-```bash
-# Emergency stop (finishes current task first)
-touch .overnight-stop
-```
+Every termination prints a structured summary with completed/blocked/remaining counts and next-step commands.
 
 ## State
 
 `overnight-plan.md` is the entire state machine:
 
 ```markdown
-- [x] **Create User model** `overnight-1`              ← done, merged
-- [x] **Add registration endpoint** `overnight-2`      ← done, merged
-- [ ] **Add OAuth flow** `overnight-3`                  ← current task
-- [ ] **Add session management** `overnight-4`          ← queued
-- [ ] **Add rate limiting** <!-- BLOCKED: reason -->     ← failed, skipped
+- [x] **Create User model** `overnight-1`                     ← done
+- [R] **Refactor auth middleware** `overnight-2`               ← done, needs review
+- [ ] **Add OAuth flow** `overnight-3`                         ← next up
+- [ ] **Add rate limiting** <!-- BLOCKED: reason -->            ← failed, skipped
 ```
 
-Git history on the overnight branch:
+## Safety
 
-```
-overnight/2026-03-18:
-  overnight: plan — Add user authentication
-  overnight: Create User model
-  overnight: mark Create User model complete
-  overnight: Add registration endpoint
-  overnight: mark Add registration endpoint complete
-  ...
-```
+| Concern | How it's handled |
+|---------|-----------------|
+| Main branch | Never touched. All work on `overnight/` branch. |
+| Dirty working tree | Refuses to start. Must commit or stash first. |
+| Branch collision | Timestamp precision (`HHMMSS`) prevents same-day collisions. |
+| Worker crash | Squash-merge verified before branch deletion. |
+| Merge conflict | Detected and aborted. Task marked BLOCKED. |
+| Branch deletion | Uses `git branch -d` (safe). Refuses if not merged. |
+| Runaway mining | Phase 3 capped at 2 cycles. Only objective gaps. |
+| Cost | `--max-budget-usd 5` per worker. Total estimate printed upfront. |
 
-## Recovery
+## CLAUDE.md Matters
 
-```bash
-# Worker stuck? Resume with context preserved
-claude -r overnight-3 -p "The test failed because X. Try Y instead."
-
-# Check what a worker did
-git diff --stat overnight/2026-03-18...worktree-overnight-3
-
-# See worker's full history
-git log --oneline overnight/2026-03-18..worktree-overnight-3
-```
-
-## CLAUDE.md Is Everything
-
-Each worker reads the project's `CLAUDE.md` as its briefing. Overnight quality = CLAUDE.md quality.
+Each worker reads `CLAUDE.md` as its briefing. No CLAUDE.md = the first task creates one.
 
 **Good CLAUDE.md for overnight:**
 
 ```markdown
 # Build & Test
 npm run build          # TypeScript compilation
-npm test               # Jest test suite
+npm test               # Jest suite
 npm run lint           # ESLint
 
 # Architecture
-src/models/     — Sequelize models, one file per table
+src/models/     — Sequelize models, one per table
 src/routes/     — Express route handlers
 src/middleware/  — Auth, validation, error handling
 
@@ -204,15 +179,30 @@ src/middleware/  — Auth, validation, error handling
 
 # Do NOT
 - Do not use raw SQL — use Sequelize query builder
-- Do not add dependencies without checking package.json first
+- Do not add dependencies without checking package.json
 ```
 
-No CLAUDE.md? Overnight's first task will be creating one.
+## Debugging
+
+```bash
+# Quick status
+cat overnight-plan.md | grep -E '^\- \[' | head -20
+
+# Find blocked tasks
+grep "BLOCKED" overnight-plan.md
+
+# See all changes vs main
+git diff --stat main...overnight/2026-03-18-231500
+
+# Fix a blocked task manually, then resume
+vim overnight-plan.md    # mark [x] or edit the task
+bash overnight.sh        # or re-run /overnight on the branch
+```
 
 ## Philosophy
 
 - **Maximum decomposition** — More tasks > fewer tasks. Smaller blast radius per worktree.
-- **Tests are the spec** — If you can't write a completion command, you don't understand the task yet.
+- **EARS for clarity** — Structured requirements eliminate ambiguity for autonomous agents.
 - **Orchestrator ≠ worker** — Separation of concerns. Plan and track vs. execute.
 - **Never stop early** — When planned work is done, mine for more. Stop only when there's genuinely nothing left.
 - **Main stays clean** — All work on a branch. You decide to PR or discard.
