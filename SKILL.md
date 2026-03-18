@@ -163,53 +163,48 @@ Only `.overnight-stop` and consecutive failures are hard stops. Completing the p
 
 Find the first `- [ ]` task in `overnight-plan.md`. **Skip any task that contains `<!-- BLOCKED` — these have already failed and should not be retried.**
 
-### 2.3 — Dispatch Worker (Synchronous)
+### 2.3 — Dispatch Worker
 
-Write the worker prompt to a temp file to avoid shell quoting issues, then spawn:
+Use the **Agent tool** with `isolation: "worktree"` to spawn each worker. This gives the worker a full isolated copy of the repo where it can read, write, and execute code — then returns results back to the orchestrator.
 
-```bash
-# Write prompt to temp file (avoids shell interpolation problems)
-cat > /tmp/overnight-worker-prompt.md << 'PROMPT_END'
-You are an overnight worker session.
+```
+Agent(
+  name: "overnight-<n>",
+  description: "<task title>",
+  isolation: "worktree",
+  mode: "bypassPermissions",
+  prompt: "You are an overnight worker session.
 
-PROJECT CONTEXT:
-<contents of CLAUDE.md, read from file>
+    YOUR TASK:
+    <full task block from overnight-plan.md>
 
-YOUR TASK:
-<full task block from overnight-plan.md>
-
-INSTRUCTIONS:
-1. You are on a worktree branch. Only modify files relevant to this task.
-2. Read relevant code before changing anything.
-3. Implement ONLY this task. Do not touch anything else.
-4. Run the acceptance command: <acceptance command>
-5. If it passes, commit your changes with message: "overnight: <task title>"
-6. If it fails, retry up to 3 times with fixes.
-7. If still failing after 3 attempts, commit what you have with message: "overnight: BLOCKED — <reason>"
-8. Do NOT run git checkout, git merge, or switch branches.
-9. Exit when done.
-PROMPT_END
-
-# Spawn worker — this BLOCKS until the worker exits
-claude -w <name> \
-  -p "$(cat /tmp/overnight-worker-prompt.md)" \
-  --permission-mode auto \
-  --max-budget-usd 5
+    INSTRUCTIONS:
+    1. Read the project's CLAUDE.md first for context.
+    2. Read the code relevant to this task before changing anything.
+    3. Implement ONLY this task. Do not touch anything else.
+    4. Run the acceptance command: <acceptance command>
+    5. If it passes, commit your changes with message: 'overnight: <task title>'
+    6. If it fails, retry up to 3 times with fixes.
+    7. If still failing after 3 attempts, commit what you have with message:
+       'overnight: BLOCKED — <reason>'
+    8. Do NOT run git checkout, git merge, or switch branches.
+    9. Report what you did when done."
+)
 ```
 
-**This is a blocking call.** The orchestrator waits until the worker finishes. No polling needed.
+**This is a blocking call.** The orchestrator waits until the Agent returns. The worktree is automatically created and the worker has full file read/write/execute capabilities.
 
 ### 2.4 — Evaluate Result
 
-After the worker exits, check its branch:
+When the Agent returns, check:
 
-```bash
-# Check what changed
-git log --oneline "$OVERNIGHT_BRANCH"..$(git worktree list | grep <name> | awk '{print "HEAD"}')
-
-# Check if BLOCKED
-git log --oneline -1 <worktree-branch> | grep -q "BLOCKED"
-```
+1. **Did the worker report success or BLOCKED?** Read the agent's return message.
+2. **Verify with git:**
+   ```bash
+   # If the agent made changes, it returns the worktree path and branch
+   # Check the last commit message on that branch
+   git log --oneline -1 <worktree-branch>
+   ```
 
 - **If BLOCKED:** Update `overnight-plan.md` — add `<!-- BLOCKED: reason -->` after the task line. Increment consecutive failure counter.
 - **If success:** Reset consecutive failure counter to 0.
@@ -217,7 +212,7 @@ git log --oneline -1 <worktree-branch> | grep -q "BLOCKED"
 
 ### 2.5 — Merge to Overnight Branch
 
-**Verify merge success before proceeding:**
+**If the worker made changes** (agent returned a worktree path/branch):
 
 ```bash
 git checkout "$OVERNIGHT_BRANCH"
@@ -233,21 +228,21 @@ else
 fi
 ```
 
+**If the agent returned with no changes** (worktree auto-cleaned), the task either failed or was a no-op. Check the agent's return message to determine which.
+
 ### 2.6 — Cleanup and Update State
 
-**Only delete the branch after confirming merge succeeded:**
+Worktrees from Agent tool are **automatically cleaned up** if no changes were made. If changes were made and merged:
 
 ```bash
-# Find actual worktree path (don't assume .claude/worktrees/)
+# Find actual worktree path
 WORKTREE_PATH=$(git worktree list | grep <name> | awk '{print $1}')
 
-# Remove worktree
-git worktree remove "$WORKTREE_PATH"
+# Remove worktree (if still exists after merge)
+git worktree remove "$WORKTREE_PATH" 2>/dev/null || true
 
 # Safe delete — refuses if not merged (safety net)
-git branch -d <worktree-branch>
-# Only if -d fails AND merge was confirmed:
-# git branch -D <worktree-branch>
+git branch -d <worktree-branch> 2>/dev/null || true
 ```
 
 Update `overnight-plan.md`: mark task `- [x]` (or `- [R]` for REVIEW tasks).
@@ -261,7 +256,7 @@ git commit -m "overnight: mark <task title> complete"
 
 ### 2.7 — Next Task
 
-Loop back to **2.1**. The next worker will branch from the updated overnight branch, inheriting all previous work.
+Loop back to **2.1**. The next worker inherits all previous merged work because it branches from the updated overnight branch.
 
 ---
 
@@ -345,12 +340,11 @@ For each task iteration, you (the orchestrator) must:
 
 1. Check termination conditions (stop file, consecutive failures, all done)
 2. Select next `- [ ]` task, skipping any with `<!-- BLOCKED`
-3. Write worker prompt to temp file
-4. Spawn worker: `claude -w <name> -p "$(cat /tmp/overnight-worker-prompt.md)" --permission-mode auto --max-budget-usd 5`
-5. Wait for worker to exit (blocking call)
-6. Evaluate: success, REVIEW, or BLOCKED
-7. Squash-merge to overnight branch (verify success before cleanup)
-8. Safe-delete worktree and branch (`git branch -d`, not `-D`)
-9. Update `overnight-plan.md` checkbox
-10. Commit state update
-11. Loop
+3. Spawn worker via Agent tool with `isolation: "worktree"` and `mode: "bypassPermissions"`
+4. Wait for Agent to return (blocking call)
+5. Evaluate result: success, REVIEW, or BLOCKED
+6. If changes were made: squash-merge to overnight branch (verify success before cleanup)
+7. Cleanup worktree and branch (`git branch -d`, not `-D`)
+8. Update `overnight-plan.md` checkbox
+9. Commit state update
+10. Loop

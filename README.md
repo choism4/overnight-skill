@@ -50,10 +50,8 @@ Phase 2: Execute (orchestrator loop)
 │  ┌─────────────────────────────────────────┐
 │  │  For each task:                         │
 │  │  ├── Skip BLOCKED tasks                 │
-│  │  ├── claude -w overnight-N              │
-│  │  │     --permission-mode auto           │
-│  │  │     --max-budget-usd 5               │
-│  │  │   (blocks until worker exits)        │
+│  │  ├── Agent(isolation: "worktree")       │
+│  │  │   (blocks until agent returns)       │
 │  │  ├── Verify merge → squash-merge        │
 │  │  ├── Safe cleanup (git branch -d)       │
 │  │  └── Update plan [x] or [R] or BLOCKED  │
@@ -75,20 +73,20 @@ Phase 3: Mine for More Work (max 2 cycles)
 │                          │    Decomposes, dispatches,
 │                          │    monitors, merges.
 └────────────┬────────────┘
-             │ claude -w overnight-1 (blocking)
+             │ Agent(isolation: "worktree")
              ▼
 ┌─────────────────────────┐
-│   WORKER overnight-1     │    Isolated worktree.
-│                          │    Implements ONE task.
-│   1. Read relevant code  │    Runs acceptance check.
-│   2. Implement task      │    Commits + exits.
+│   WORKER overnight-1     │    Isolated worktree via
+│                          │    Agent tool.
+│   1. Read relevant code  │    Full read/write/execute.
+│   2. Implement task      │    Commits + returns.
 │   3. Run acceptance cmd  │
-│   4. Commit + exit       │    Then orchestrator merges
+│   4. Commit + return     │    Then orchestrator merges
 └─────────────────────────┘    and spawns overnight-2.
 ```
 
-- Each worker gets a **fresh worktree** branched from the latest overnight branch
-- Workers run **synchronously** — orchestrator waits, no polling
+- Each worker is an **Agent with `isolation: "worktree"`** — full isolated repo copy
+- Workers run **synchronously** — orchestrator blocks until Agent returns
 - **Main is never touched** — all work on `overnight/YYYY-MM-DD-HHMMSS`
 
 ## Task Format
