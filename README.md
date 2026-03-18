@@ -53,7 +53,7 @@ Phase 2: Execute (orchestrator loop)
 │  │  ├── Agent(isolation: "worktree")       │
 │  │  │   (blocks until agent returns)       │
 │  │  ├── Verify merge → squash-merge        │
-│  │  ├── Safe cleanup (git branch -d)       │
+│  │  ├── Cleanup (git branch -D after merge) │
 │  │  └── Update plan [x] or [R] or BLOCKED  │
 │  └─────────────────────────────────────────┘
 │
@@ -150,7 +150,7 @@ Every termination prints a structured summary with completed/blocked/remaining c
 | Branch collision | Timestamp precision (`HHMMSS`) prevents same-day collisions. |
 | Worker crash | Squash-merge verified before branch deletion. |
 | Merge conflict | Detected and aborted. Task marked BLOCKED. |
-| Branch deletion | Uses `git branch -d` (safe). Refuses if not merged. |
+| Branch deletion | `git branch -D` after squash-merge confirmed. Squash creates new commits so `-d` always fails. |
 | Runaway mining | Phase 3 capped at 2 cycles. Only objective gaps. |
 | Cost | `--max-budget-usd 5` per worker. Total estimate printed upfront. |
 

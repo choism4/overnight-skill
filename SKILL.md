@@ -241,8 +241,9 @@ WORKTREE_PATH=$(git worktree list | grep <name> | awk '{print $1}')
 # Remove worktree (if still exists after merge)
 git worktree remove "$WORKTREE_PATH" 2>/dev/null || true
 
-# Safe delete — refuses if not merged (safety net)
-git branch -d <worktree-branch> 2>/dev/null || true
+# Force delete — squash-merge creates a new commit, so git won't recognize
+# the branch as "merged" even though it is. -D is correct here.
+git branch -D <worktree-branch> 2>/dev/null || true
 ```
 
 Update `overnight-plan.md`: mark task `- [x]` (or `- [R]` for REVIEW tasks).
@@ -344,7 +345,7 @@ For each task iteration, you (the orchestrator) must:
 4. Wait for Agent to return (blocking call)
 5. Evaluate result: success, REVIEW, or BLOCKED
 6. If changes were made: squash-merge to overnight branch (verify success before cleanup)
-7. Cleanup worktree and branch (`git branch -d`, not `-D`)
+7. Cleanup worktree and branch (`git branch -D` — safe after squash-merge)
 8. Update `overnight-plan.md` checkbox
 9. Commit state update
 10. Loop
