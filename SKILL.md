@@ -184,8 +184,11 @@ Agent(
     3. Implement ONLY this task. Do not touch anything else.
     4. Run the acceptance command: <acceptance command>
     5. If it passes, commit your changes with message: 'overnight: <task title>'
-    6. If it fails, retry up to 3 times with fixes.
-    7. If still failing after 3 attempts, commit what you have with message:
+    6. If it fails, retry up to 3 times with exponential backoff:
+       - First retry: wait 2 seconds, then fix and re-run
+       - Second retry: wait 4 seconds, then fix and re-run
+       - Third retry: wait 8 seconds, then fix and re-run
+    7. If still failing after 3 retried attempts, commit what you have with message:
        'overnight: BLOCKED — <reason>'
     8. Do NOT run git checkout, git merge, or switch branches.
     9. Report what you did when done."
@@ -193,6 +196,8 @@ Agent(
 ```
 
 **This is a blocking call.** The orchestrator waits until the Agent returns. The worktree is automatically created and the worker has full file read/write/execute capabilities.
+
+**Retry strategy:** Workers use exponential backoff when the acceptance command fails: 2s, 4s, 8s delays between retries. This avoids hammering flaky commands (e.g., servers still starting, file locks) and gives transient issues time to resolve before marking a task BLOCKED.
 
 ### 2.4 — Evaluate Result
 
@@ -255,7 +260,24 @@ git add overnight-plan.md
 git commit -m "overnight: mark <task title> complete"
 ```
 
-### 2.7 — Next Task
+### 2.7 — Report Progress
+
+After each task completes and state is updated, print a progress line so the user can see status at a glance:
+
+```
+Progress: 5/18 done (28%) | 1 blocked | elapsed: 42m | success rate: 83%
+```
+
+Compute this from `overnight-plan.md`:
+- **done** = count of `- [x]` + `- [R]` lines
+- **total** = count of all task lines (`- [x]`, `- [R]`, `- [ ]`, BLOCKED)
+- **blocked** = count of `<!-- BLOCKED` lines
+- **elapsed** = wall-clock time since Phase 2 started (track the start timestamp)
+- **success rate** = done / (done + blocked) as a percentage (100% if no tasks attempted yet)
+
+This progress line keeps the session log readable for async monitoring.
+
+### 2.8 — Next Task
 
 Loop back to **2.1**. The next worker inherits all previous merged work because it branches from the updated overnight branch.
 
@@ -278,6 +300,51 @@ Loop back to **2.1**. The next worker inherits all previous merged work because 
 4. **If no concrete gaps found, or mining cycles exhausted:** Print final summary and end.
 
 **Only generate tasks for objectively measurable gaps** (test failures, lint errors, missing error paths, BLOCKED retries). Do NOT generate tasks for subjective improvements (code style, documentation polish, "nice to have" features).
+
+---
+
+## Resume & Recovery
+
+If the orchestrator session is interrupted — context window exhausted, connection lost, or process killed — the system can recover because `overnight-plan.md` IS the persistent state.
+
+### How recovery works
+
+1. **`overnight-plan.md` is the source of truth.** Checked tasks (`- [x]`, `- [R]`) are done and already merged to the overnight branch. The first unchecked `- [ ]` task (that is not `<!-- BLOCKED`) is where execution should continue.
+
+2. **Re-invoke `/overnight` on the same branch to resume.** If an `overnight-plan.md` already exists on the current branch, the orchestrator should detect it and skip Phase 1 (decomposition). Instead, it picks up from the first incomplete task and continues the Phase 2 execution loop. No re-planning needed.
+
+3. **Manual recovery is also possible.** A user can:
+   - Check off tasks that were completed outside the session (`- [ ]` → `- [x]`)
+   - Remove or edit tasks that are no longer relevant
+   - Then re-run `/overnight` to continue from the updated state
+
+### Clean up orphaned worktrees
+
+An interrupted session may leave behind worktrees from in-progress workers. Before resuming, clean them up:
+
+```bash
+# List all worktrees — look for any overnight-* entries
+git worktree list
+
+# Remove orphaned worktrees
+git worktree remove /path/to/orphaned-worktree 2>/dev/null || true
+
+# Prune stale worktree references
+git worktree prune
+
+# Delete orphaned branches
+git branch -D agent-overnight-<n> 2>/dev/null || true
+```
+
+### What about partially-completed workers?
+
+If a worker was mid-task when the session died, its worktree may contain uncommitted or unmerged changes. The safest recovery path is:
+
+1. Check `git worktree list` for leftover worktrees.
+2. Inspect the worktree — if it has useful committed work, cherry-pick or squash-merge it manually.
+3. If the work is incomplete or broken, remove the worktree and let the resumed session re-dispatch the task from scratch.
+
+The task will still be `- [ ]` in the plan, so the resumed orchestrator will re-attempt it automatically.
 
 ---
 
@@ -348,4 +415,5 @@ For each task iteration, you (the orchestrator) must:
 7. Cleanup worktree and branch (`git branch -D` — safe after squash-merge)
 8. Update `overnight-plan.md` checkbox
 9. Commit state update
-10. Loop
+10. Print progress line (done/total, blocked, elapsed time, success rate)
+11. Loop

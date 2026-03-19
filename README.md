@@ -56,6 +56,7 @@ Phase 2: Execute (orchestrator loop)
 │  │  ├── Cleanup (git branch -D after merge) │
 │  │  └── Update plan [x] or [R] or BLOCKED  │
 │  └─────────────────────────────────────────┘
+│  Progress: 5/18 done (28%) | 1 blocked | elapsed: 42m | success rate: 83%
 │
 Phase 3: Mine for More Work (max 2 cycles)
 ├── Run tests + linter
@@ -88,6 +89,7 @@ Phase 3: Mine for More Work (max 2 cycles)
 - Each worker is an **Agent with `isolation: "worktree"`** — full isolated repo copy
 - Workers run **synchronously** — orchestrator blocks until Agent returns
 - **Main is never touched** — all work on `overnight/YYYY-MM-DD-HHMMSS`
+- **Retry with backoff** — workers retry failed acceptance commands with exponential backoff (2s → 4s → 8s). After 3 retries the task is marked BLOCKED and skipped.
 
 ## Task Format
 
@@ -194,7 +196,28 @@ git diff --stat main...overnight/2026-03-18-231500
 
 # Fix a blocked task manually, then resume
 vim overnight-plan.md    # mark [x] or edit the task
-bash overnight.sh        # or re-run /overnight on the branch
+/overnight               # re-run on the branch
+```
+
+### Resuming an interrupted session
+
+If the session was interrupted (crash, network drop, terminal closed), `overnight-plan.md` holds the full state. Completed tasks are marked `[x]`, so nothing is repeated.
+
+To resume:
+
+```bash
+# Switch to the overnight branch
+git checkout overnight/2026-03-18-231500
+
+# Re-run overnight — it picks up from the first incomplete task
+/overnight
+```
+
+If a worker was mid-flight when interrupted, its worktree may be orphaned:
+
+```bash
+git worktree list        # look for stale overnight entries
+git worktree prune       # clean up orphaned worktrees
 ```
 
 ## Philosophy
@@ -209,7 +232,7 @@ bash overnight.sh        # or re-run /overnight on the branch
 ## Inspired By
 
 - [Ralph Loop](https://github.com/tradesdontlie/ralph-loop-skills) — "one task per context window" and "checkboxes as state machines"
-- [p-worktree](https://github.com/anthropics/claude-code) pattern — orchestrator + isolated worktree workers via `claude -w`
+- [Agent tool](https://docs.anthropic.com/en/docs/claude-code) worktree isolation pattern — orchestrator + isolated worktree workers via `Agent(isolation: "worktree")`
 
 ## License
 
