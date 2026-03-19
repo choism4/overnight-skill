@@ -1,6 +1,6 @@
 # Overnight
 
-One prompt. Zero babysitting. Come back to working code.
+Plan together. Execute autonomously. Come back to working code.
 
 ## Install
 
@@ -14,7 +14,7 @@ npx skills add choism4/overnight-skill
 /overnight Add user authentication with email/password, OAuth, and session management
 ```
 
-That's it. Walk away.
+Overnight generates a plan and walks through it with you. Edit, add, drop tasks. When you're happy, say **"go"** — then walk away.
 
 Come back and check:
 
@@ -39,12 +39,16 @@ Overnight is an autonomous background agent for Claude Code. It takes a big goal
      ▼
 Phase 0: Preflight
 ├── Check clean working tree (refuse if dirty)
-├── Create branch: overnight/YYYY-MM-DD-HHMMSS
 │
-Phase 1: Decompose
+Phase 1: Decompose + Collaborate          ◄── YOU ARE HERE
 ├── Read CLAUDE.md + codebase
 ├── Break goal into maximum atomic tasks (EARS syntax)
-├── Write overnight-plan.md + cost estimate
+├── Present plan + cost estimate
+├── Discuss with you: add, split, drop, edit
+├── You say "go"
+├── Create branch: overnight/YYYY-MM-DD-HHMMSS
+│
+     ▼  (autonomous from here)
 │
 Phase 2: Execute (orchestrator loop)
 │  ┌─────────────────────────────────────────┐
@@ -58,11 +62,12 @@ Phase 2: Execute (orchestrator loop)
 │  └─────────────────────────────────────────┘
 │  Progress: 5/18 done (28%) | 1 blocked | elapsed: 42m | success rate: 83%
 │
-Phase 3: Mine for More Work (max 2 cycles)
-├── Run tests + linter
-├── Find concrete gaps (failures, TODOs, BLOCKED retries)
+Phase 3: Mine for More Work (up to 5 cycles)
+├── Run tests + linter + read produced code
+├── Find gaps: failures, TODOs, BLOCKED retries,
+│   integration gaps, missing tests, unfinished goals
 ├── Generate new tasks → back to Phase 2
-└── No gaps found → print summary → "I'm going to bed too..."
+└── Nothing left → "I'm going to bed too..."
 ```
 
 ## Architecture
@@ -128,7 +133,7 @@ Every task uses [EARS syntax](https://en.wikipedia.org/wiki/EARS_%28requirements
 |---------|---------|
 | `.overnight-stop` file | "Stopping as requested. Here's where things stand..." |
 | 3 consecutive BLOCKED tasks | "Hit a wall — 3 tasks in a row couldn't complete..." |
-| All tasks done + Phase 3 exhausted | "I'm going to bed too..." |
+| All tasks done + 5 mining cycles exhausted | "I'm going to bed too..." |
 
 Every termination prints a structured summary with completed/blocked/remaining counts and next-step commands.
 
@@ -227,7 +232,7 @@ git worktree prune       # clean up orphaned worktrees
 - **Orchestrator ≠ worker** — Separation of concerns. Plan and track vs. execute.
 - **Never stop early** — When planned work is done, mine for more. Stop only when there's genuinely nothing left.
 - **Main stays clean** — All work on a branch. You decide to PR or discard.
-- **Zero friction** — `/overnight PROMPT`. That's the entire interface.
+- **Plan together, execute alone** — Collaborative planning, then fully autonomous execution.
 
 ## Inspired By
 

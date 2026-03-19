@@ -20,15 +20,11 @@ You are the **orchestrator**. The user gives you a high-level objective. You dec
 Before anything else, verify the workspace is safe to use:
 
 ```bash
-# 1. Reject dirty working tree
+# Reject dirty working tree
 if [ -n "$(git status --porcelain)" ]; then
   echo "ERROR: Uncommitted changes detected. Commit or stash before running /overnight."
   exit 1
 fi
-
-# 2. Create branch with timestamp precision to avoid same-day collisions
-OVERNIGHT_BRANCH="overnight/$(date '+%Y-%m-%d-%H%M%S')"
-git checkout -b "$OVERNIGHT_BRANCH"
 ```
 
 If the working tree is dirty, **stop immediately** and tell the user to commit or stash first.
@@ -119,27 +115,46 @@ Tasks with `REVIEW:` acceptance are marked `- [R]` on completion instead of `- [
 4. **Tests first when possible.** Test task before implementation task.
 5. **File scope required.** Every task lists expected files to touch.
 
-### Step 3 — Write the Plan, Estimate Cost, and Start
+### Step 3 — Present the Plan and Collaborate
 
 1. Write the plan to `overnight-plan.md`.
 
-2. Print cost estimate:
+2. Present the plan to the user with a cost estimate:
    ```
    Overnight plan: <goal summary>
    Tasks: <N>
    Estimated cost: ~$<N × 3-5> (based on ~$3-5 per task)
-   Branch: <OVERNIGHT_BRANCH>
+   Branch: <OVERNIGHT_BRANCH> (will be created on "go")
+
+   Full plan written to: overnight-plan.md
    ```
 
-3. Commit the plan:
+3. Then **discuss the plan with the user**. Prompt:
+   ```
+   Review the plan above. You can:
+     - "add ..."        → describe a missing task to insert
+     - "split N"        → break task N into smaller pieces
+     - "drop N"         → remove a task
+     - "edit"           → pause while you edit overnight-plan.md directly
+     - "go"             → approve and start autonomous execution
+   ```
+
+4. **Stay in this loop until the user says "go".** For each refinement:
+   - Apply the change to `overnight-plan.md`
+   - Show the affected tasks (not the full plan)
+   - Re-prompt for further input
+
+5. On "go", create the branch and commit:
    ```bash
+   OVERNIGHT_BRANCH="overnight/$(date '+%Y-%m-%d-%H%M%S')"
+   git checkout -b "$OVERNIGHT_BRANCH"
    git add overnight-plan.md
    git commit -m "overnight: plan — <goal summary>"
    ```
 
-4. **Immediately** begin Phase 2.
+6. **Immediately** begin Phase 2. From here on, execution is fully autonomous.
 
-No approval gate. `/overnight` IS the approval.
+**The plan is collaborative. The execution is not.** Time spent refining the plan saves hours of wasted autonomous work.
 
 ---
 
@@ -285,21 +300,39 @@ Loop back to **2.1**. The next worker inherits all previous merged work because 
 
 ## Phase 3: Mine for More Work
 
-**Maximum 2 mining cycles.** When all `- [ ]` tasks are complete:
+When all `- [ ]` tasks are complete, **do not stop**. Actively search for more meaningful work. You may mine up to **5 cycles** before stopping.
 
-1. **Run objective checks.** Run the full test suite. Run the linter. These are facts, not opinions.
+### Mining procedure
 
-2. **Look for concrete gaps:**
-   - Test failures or lint errors introduced by overnight work
-   - BLOCKED tasks that can now be approached differently (different strategy, not retry)
-   - TODOs left in the code by workers
-   - Missing error handling for paths that are clearly unhandled
+Each cycle:
 
-3. **If you find work:** Generate new tasks in the same format, append to `overnight-plan.md`, commit, and loop back to **Phase 2**. Decrement mining cycles remaining.
+1. **Run objective checks.** Run the full test suite. Run the linter. Run the build. These are facts, not opinions.
 
-4. **If no concrete gaps found, or mining cycles exhausted:** Print final summary and end.
+2. **Read the code that was produced.** Actually review the implementations — don't just check if tests pass. Look at the code with fresh eyes.
 
-**Only generate tasks for objectively measurable gaps** (test failures, lint errors, missing error paths, BLOCKED retries). Do NOT generate tasks for subjective improvements (code style, documentation polish, "nice to have" features).
+3. **Systematically look for gaps across these categories:**
+
+   | Category | What to look for |
+   |----------|-----------------|
+   | **Test failures** | Tests or lint errors introduced by overnight work |
+   | **BLOCKED retries** | Tasks that failed before but can now be approached differently |
+   | **TODOs in code** | `TODO`, `FIXME`, `HACK` left by workers |
+   | **Error handling** | Missing error paths, unhandled edge cases |
+   | **Integration gaps** | Components that were built separately but not wired together |
+   | **Missing tests** | New code paths without test coverage |
+   | **Spec compliance** | Requirements from CLAUDE.md or specs not fully met |
+
+4. **If you find work:** Generate new tasks in the same EARS format, append to `overnight-plan.md`, commit, and loop back to **Phase 2**.
+
+5. **If genuinely nothing found this cycle:** Stop mining. Print final summary and end.
+
+### Mining rules
+
+- **Be thorough, not creative.** Mine for gaps in what was built, not new features.
+- **Each cycle must produce at least 1 task or stop.** No empty cycles.
+- **Read the actual code, don't just grep.** Shallow checks find shallow issues.
+- **BLOCKED tasks deserve a second look.** The codebase has changed since they failed — a different approach may work now.
+- **If the original goal has clearly unfinished aspects, keep going.** Don't stop just because the initial plan is done if the goal isn't fully achieved.
 
 ---
 

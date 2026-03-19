@@ -41,5 +41,6 @@ None. This project contains only markdown files. There is nothing to build or te
 - Do not rename the skill. It must remain `overnight` in SKILL.md frontmatter.
 - Do not change the SKILL.md structure without updating README.md to match (and vice versa). Keep them in sync.
 - Do not remove EARS syntax requirements. They are core to the skill's design.
-- Do not add an approval gate to Phase 2. `/overnight` IS the approval.
+- Do not add an approval gate to Phase 2. Phase 1 is collaborative (user says "go"), Phase 2 is fully autonomous.
+- Do not make Phase 3 (mining) give up easily. It should aggressively search for gaps up to 5 cycles.
 - Do not commit runtime artifacts (`overnight-plan.md`, `.overnight-stop`, `.overnight-logs/`). They are gitignored.
