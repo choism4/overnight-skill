@@ -405,6 +405,19 @@ Next steps:
 ══════════════════════════════════════════
 ```
 
+### Cleanup
+
+After printing the summary, clean up runtime artifacts from the branch:
+
+```bash
+rm -f overnight-plan.md .overnight-stop
+rm -rf .overnight-logs/
+git add -A
+git commit -m "overnight: cleanup runtime artifacts"
+```
+
+`overnight-plan.md` served its purpose as the state machine during execution. The git history preserves the full record — the file itself is no longer needed.
+
 Then end with: **"I'm going to bed too..."**
 
 ---
